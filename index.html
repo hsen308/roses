@@ -1,0 +1,1745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASCII Lily & Tulip 3D Bouquet — Volumetric Botanical Renderer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Playfair+Display:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+    }
+    body {
+      background-color: #030305;
+      color: #f4f4f6;
+      font-family: 'JetBrains Mono', monospace;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+    canvas {
+      display: block;
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+    /* Subtle CRT scanline & vignette overlay */
+    .crt-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(3, 3, 5, 0) 60%, rgba(2, 2, 4, 0.78) 100%),
+        repeating-linear-gradient(
+          0deg,
+          rgba(255, 255, 255, 0.012) 0px,
+          rgba(255, 255, 255, 0.012) 1px,
+          transparent 1px,
+          transparent 3px
+        );
+    }
+    .glass-panel {
+      background: rgba(10, 10, 16, 0.76);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(255, 255, 255, 0.14);
+      height: 4px;
+      border-radius: 999px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #fb7185;
+      cursor: pointer;
+      box-shadow: 0 0 10px #fb7185;
+      transition: transform 0.15s ease;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+    .code-watermark {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      letter-spacing: -0.02em;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Main Interactive 3D ASCII Canvas -->
+  <canvas id="asciiCanvas"></canvas>
+
+  <!-- Subtle CRT & Vignette Overlay -->
+  <div class="crt-overlay"></div>
+
+  <!-- Top Left Minimal Poetic Header -->
+  <div id="topBanner" class="fixed top-5 left-6 z-20 pointer-events-none transition-opacity duration-500">
+    <div class="flex items-center gap-2 text-[10px] tracking-[0.25em] uppercase text-rose-400/85 mb-1">
+      <span class="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+      <span>127.0.0.1:5500/lily_bouquet.html</span>
+    </div>
+    <h1 class="text-xl sm:text-2xl text-amber-50/95 tracking-tight" style="font-family: 'Playfair Display', serif; font-style: italic;">
+      Who needs flowers when you can code them?
+    </h1>
+    <p id="statsReadout" class="text-[11px] text-zinc-500 mt-0.5">
+      3D z-buffer: 7 lilies · 8 tulips · 26 stems · [Shift] Loupe
+    </p>
+  </div>
+
+  <!-- Authentic Bottom Code Bar Reference from Viral Reel -->
+  <div class="fixed bottom-3 left-6 z-20 pointer-events-none hidden md:block opacity-50">
+    <p class="code-watermark text-zinc-400">
+      <span class="text-rose-400">let</span> ymin = <span class="text-amber-300">1e9</span>, ymax = <span class="text-amber-300">-1e9</span>, maxw = <span class="text-amber-300">0</span>;
+      <span class="text-sky-400">if</span> (x &gt; xmax) xmax = x; <span class="text-sky-400">if</span> (y &lt; ymin) ymin = y; <span class="text-sky-400">if</span> (y &gt; ymax) ymax = y;
+    </p>
+  </div>
+
+  <!-- Floating Glassmorphism HUD Controls -->
+  <div class="fixed top-5 right-5 z-30 flex flex-col items-end">
+    <button
+      id="hudToggleBtn"
+      class="glass-panel px-3.5 py-2 rounded-xl text-xs font-medium text-zinc-200 hover:text-white hover:border-rose-400/40 transition flex items-center gap-2 mb-2 shadow-lg"
+      title="Toggle Controls"
+    >
+      <span class="text-rose-400">✦</span>
+      <span id="hudToggleLabel">3D Floral Controls</span>
+    </button>
+
+    <div id="hudPanel" class="glass-panel w-76 rounded-2xl p-4 text-xs text-zinc-300 space-y-3.5 transition-all duration-300 origin-top-right">
+      <div class="flex items-center justify-between border-b border-white/10 pb-2.5">
+        <span class="font-semibold text-white tracking-wide uppercase text-[11px]">3D Chiaroscuro ASCII Engine</span>
+        <span id="fpsBadge" class="text-[10px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">60 FPS</span>
+      </div>
+
+      <!-- ASCII Resolution / Character Density Toggle -->
+      <div>
+        <div class="flex justify-between mb-1.5">
+          <span class="text-zinc-400">Character Density</span>
+          <span id="densityLabel" class="text-rose-300 font-semibold">Ultra-Fine HD (5.5px)</span>
+        </div>
+        <div class="grid grid-cols-3 gap-1.5">
+          <button data-size="5" class="res-btn py-1.5 rounded-lg border border-rose-500/50 bg-rose-500/20 text-white text-[11px] transition">Ultra HD 5px</button>
+          <button data-size="7" class="res-btn py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] transition">Classic 7px</button>
+          <button data-size="9" class="res-btn py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] transition">Macro 9px</button>
+        </div>
+      </div>
+
+      <!-- 3D Depth & Specular Contrast Slider -->
+      <div>
+        <div class="flex justify-between mb-1">
+          <span class="text-zinc-400">3D Chiaroscuro & Rim Glow</span>
+          <span id="glowValue" class="text-amber-300">75%</span>
+        </div>
+        <input id="glowSlider" type="range" min="0" max="100" value="75" class="w-full" />
+      </div>
+
+      <!-- Lighting & Color Palette Selector -->
+      <div>
+        <span class="text-zinc-400 block mb-1.5">3D Lighting & Palette</span>
+        <div class="grid grid-cols-2 gap-1.5">
+          <button data-palette="studio" class="palette-btn py-1.5 px-2 rounded-lg border border-rose-500/50 bg-rose-500/20 text-white text-[11px] text-left truncate">🌺 Studio Chiaroscuro</button>
+          <button data-palette="cyberpunk" class="palette-btn py-1.5 px-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] text-left truncate">⚡ Neon Cyber Glow</button>
+          <button data-palette="pastel" class="palette-btn py-1.5 px-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] text-left truncate">🌙 Botanical Pastel</button>
+          <button data-palette="golden" class="palette-btn py-1.5 px-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] text-left truncate">✨ Golden Hour</button>
+        </div>
+      </div>
+
+      <!-- Toggles -->
+      <div class="flex items-center justify-between pt-1">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input id="swayToggle" type="checkbox" checked class="accent-rose-500 rounded cursor-pointer" />
+          <span class="text-zinc-300">3D Parallax & Wind</span>
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer" title="Hold Shift or toggle to inspect micro-ASCII">
+          <input id="loupeToggle" type="checkbox" class="accent-rose-500 rounded cursor-pointer" />
+          <span class="text-zinc-300">Loupe [Shift]</span>
+        </label>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="pt-1 flex gap-2">
+        <button
+          id="rebloomBtn"
+          class="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-rose-500 via-pink-500 to-amber-500 text-white font-semibold text-xs shadow-lg shadow-rose-500/25 hover:brightness-110 active:scale-[0.98] transition flex items-center justify-center gap-1.5"
+        >
+          <span>🌷</span>
+          <span>Re-Bloom 3D Bouquet</span>
+        </button>
+        <button
+          id="hideUiBtn"
+          class="py-2 px-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-zinc-300 text-xs transition"
+          title="Cinema Mode (Hide Header)"
+        >
+          👁️
+        </button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/**
+ * ============================================================================
+ * TRUE 3D VOLUMETRIC BOTANICAL ASCII RENDERING ENGINE (LILIES + TULIPS + STEMS)
+ * ----------------------------------------------------------------------------
+ * - Multi-layer Z-buffered Painter's Algorithm with per-layer depth stamping
+ * - 7 Sculpted 3D Oriental & Stargazer Lilies (6 recurved tepals in 2 whorls,
+ *   deep #1a0208 cup shadow, bright specular midrib vein, wavy picotee rim,
+ *   dark crimson papillae speckles, 6 3D filaments + T-shaped rust anthers)
+ * - 8 Sculpted 3D Goblet Tulips & Arched Buds (concave outer & inner petals,
+ *   dark interior cup cavity, cylindrical Phong belly lighting, crisp rim lip)
+ * - 26+ Intertwined Cylindrical 3D Stems gathered at a hand-tied focal point,
+ *   sword-shaped lily leaves, broad curving glaucous tulip leaves & baby's breath
+ * - High-Definition Directional Sobel Contour (`/ \ | _ ( )`) & Volumetric
+ *   Luminance (`@ % W M # 8 & $ * + = ~ - : .`) ASCII Shader
+ * - Real-time 3D Mouse Parallax Tilt & Layer-by-Layer Botanical Re-Bloom
+ * ============================================================================
+ */
+
+const canvas = document.getElementById('asciiCanvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+// Offscreen buffers for 3D volumetric painting, Z-depth tracking & CRT bloom
+const paintCanvas = document.createElement('canvas');
+const paintCtx = paintCanvas.getContext('2d', { willReadFrequently: true });
+
+const depthCanvas = document.createElement('canvas');
+const depthCtx = depthCanvas.getContext('2d', { willReadFrequently: true });
+
+const glowCanvas = document.createElement('canvas');
+const glowCtx = glowCanvas.getContext('2d');
+
+let W = window.innerWidth;
+let H = window.innerHeight;
+
+// Engine State
+const state = {
+  fontSize: 5.5,        // Crisp 5.5px default monospace
+  stepX: 4.2,           // Ultra-dense horizontal sampling
+  stepY: 6.0,           // Ultra-dense vertical sampling
+  glowIntensity: 0.75,  // 3D chiaroscuro & phosphor bloom
+  palette: 'studio',    // 'studio' | 'cyberpunk' | 'pastel' | 'golden'
+  parallaxAndWind: true,
+  showLoupe: false,
+  shiftHeld: false,
+  cinemaMode: false,
+  bloomProgress: 1.0,   // 0 -> 1 multi-stage 3D growth
+  isBlooming: false,
+  time: 0,
+  mouseX: -9999,
+  mouseY: -9999,
+  normMouseX: 0,        // -1..1 for 3D parallax camera tilt
+  normMouseY: 0,
+  smoothTiltX: 0,
+  smoothTiltY: 0,
+  mouseActive: false,
+  glyphCount: 0,
+  bbox: { xmin: 0, xmax: 0, ymin: 0, ymax: 0, maxw: 0 }
+};
+
+// Precomputed 3D ASCII Cell Array
+let asciiGrid = [];
+
+// Background Cosmic Stars & Rising Golden Pollen Motes
+const stars = [];
+const pollenParticles = [];
+
+// Calibrated Typographic Volumetric Ramp (Brightest Specular -> Deep Shadow Pocket)
+const VOLUMETRIC_RAMP = "@%WM#8&$*+=~-:.";
+
+/**
+ * Deterministic pseudo-random generator for consistent speckles, veins, and stems
+ */
+function seededRandom(seed) {
+  const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/**
+ * Apply 3D Lighting & Color Palette Transformation
+ */
+function transformColorPalette(r, g, b, isContour, lum, mode) {
+  // Boost specular highlights & contour clarity in 3D space
+  let nr = r, ng = g, nb = b;
+
+  if (mode === 'studio') {
+    // Deep dramatic 3D chiaroscuro contrast
+    const contrast = 1.16 + state.glowIntensity * 0.18;
+    nr = Math.min(255, Math.max(0, (nr - 18) * contrast + 14));
+    ng = Math.min(255, Math.max(0, (ng - 18) * contrast + 12));
+    nb = Math.min(255, Math.max(0, (nb - 18) * contrast + 14));
+  } else if (mode === 'cyberpunk') {
+    // Electric neon bioluminescence
+    nr = Math.min(255, r * 1.25 + b * 0.42);
+    ng = Math.min(255, g * 0.92 + (g > r ? 75 : 10));
+    nb = Math.min(255, b * 1.45 + r * 0.52 + 48);
+  } else if (mode === 'pastel') {
+    // Soft luminous velvet botanical pastel
+    const avg = (r + g + b) * 0.333;
+    nr = Math.min(255, r * 0.74 + avg * 0.26 + 38);
+    ng = Math.min(255, g * 0.74 + avg * 0.26 + 35);
+    nb = Math.min(255, b * 0.78 + avg * 0.24 + 52);
+  } else if (mode === 'golden') {
+    // Warm Rembrandt golden hour light
+    nr = Math.min(255, r * 1.24 + g * 0.24 + 18);
+    ng = Math.min(255, g * 0.96 + r * 0.16 + 6);
+    nb = Math.min(255, b * 0.62);
+  }
+
+  // Extra rim highlight boost on crisp contour characters
+  if (isContour) {
+    const rimBoost = 1.18 + state.glowIntensity * 0.22;
+    nr = Math.min(255, nr * rimBoost + 16);
+    ng = Math.min(255, ng * rimBoost + 14);
+    nb = Math.min(255, nb * rimBoost + 16);
+  }
+
+  return [nr | 0, ng | 0, nb | 0];
+}
+
+/**
+ * ============================================================================
+ * 1. HERO STARGAZER & ORIENTAL LILIES (7 SCULPTED 3D BLOOMS)
+ * ============================================================================
+ */
+const HERO_LILIES = [
+  // 5. Upper-Left: Golden Amber & Tiger Yellow Lily
+  {
+    id: 5, name: 'Golden Amber Tiger Lily',
+    x: -0.19, y: -0.17, z: 0.46, scale: 0.88, rot: -0.46, tiltX: 0.88, tiltY: 0.84,
+    cupCol: [32, 8, 4], innerCol: [255, 215, 55], midCol: [242, 155, 22], tipCol: [215, 95, 18],
+    ribCol: [255, 245, 145], rimCol: [255, 232, 130], spotCol: [115, 22, 8]
+  },
+  // 6. Upper-Right: Champagne Gold & Soft Blush Lily
+  {
+    id: 6, name: 'Champagne Blush Lily',
+    x: 0.18, y: -0.18, z: 0.48, scale: 0.86, rot: 0.42, tiltX: 0.90, tiltY: 0.84,
+    cupCol: [28, 12, 8], innerCol: [235, 215, 125], midCol: [232, 178, 148], tipCol: [248, 215, 198],
+    ribCol: [255, 238, 195], rimCol: [255, 245, 238], spotCol: [128, 52, 42]
+  },
+  // 7. Lower-Right: Deep Burgundy-Wine Lily in dramatic chiaroscuro shadow
+  {
+    id: 7, name: 'Burgundy Wine Lily',
+    x: 0.21, y: 0.14, z: 0.54, scale: 0.84, rot: 0.55, tiltX: 0.86, tiltY: 0.84,
+    cupCol: [18, 2, 6], innerCol: [215, 165, 65], midCol: [138, 14, 42], tipCol: [185, 38, 72],
+    ribCol: [225, 75, 105], rimCol: [240, 145, 175], spotCol: [48, 2, 12]
+  },
+  // 1. Center-Top Hero: Deep Velvet Crimson & Ruby Red Lily
+  {
+    id: 1, name: 'Velvet Crimson Hero Lily',
+    x: -0.01, y: -0.14, z: 0.78, scale: 1.12, rot: 0.03, tiltX: 0.96, tiltY: 0.92,
+    cupCol: [26, 2, 8], innerCol: [250, 195, 58], midCol: [222, 22, 38], tipCol: [175, 12, 26],
+    ribCol: [255, 125, 95], rimCol: [255, 155, 155], spotCol: [75, 4, 10]
+  },
+  // 2. Center-Left Hero: Vibrant Magenta-Pink Stargazer Lily with bright white picotee edges
+  {
+    id: 2, name: 'Magenta Stargazer Lily',
+    x: -0.14, y: 0.04, z: 0.84, scale: 1.06, rot: -0.26, tiltX: 0.94, tiltY: 0.92,
+    cupCol: [26, 2, 12], innerCol: [185, 232, 95], midCol: [228, 38, 138], tipCol: [245, 95, 175],
+    ribCol: [255, 165, 215], rimCol: [255, 248, 252], spotCol: [92, 6, 48]
+  },
+  // 3. Center-Right Hero: Luminous Ivory-Cream Casablanca Lily with warm golden-green throat
+  {
+    id: 3, name: 'Ivory Casablanca Lily',
+    x: 0.13, y: 0.03, z: 0.86, scale: 1.08, rot: 0.24, tiltX: 0.95, tiltY: 0.92,
+    cupCol: [28, 38, 12], innerCol: [168, 218, 88], midCol: [238, 232, 212], tipCol: [255, 252, 244],
+    ribCol: [255, 255, 240], rimCol: [255, 255, 255], spotCol: [135, 98, 72]
+  },
+  // 4. Lower-Center Hero: Warm Sunset Apricot/Peach & Coral Lily
+  {
+    id: 4, name: 'Sunset Apricot Coral Lily',
+    x: -0.02, y: 0.19, z: 0.92, scale: 1.02, rot: -0.06, tiltX: 0.96, tiltY: 0.90,
+    cupCol: [32, 8, 6], innerCol: [248, 222, 92], midCol: [242, 128, 82], tipCol: [252, 185, 142],
+    ribCol: [255, 228, 175], rimCol: [255, 242, 222], spotCol: [122, 32, 18]
+  }
+];
+
+/**
+ * ============================================================================
+ * 2. SCULPTED 3D CUPPED TULIPS (8 NESTED BLOOMS & GRACEFUL ARCHED BUDS)
+ * ============================================================================
+ */
+const SCULPTED_TULIPS = [
+  // 1. Crown Top-Center Left: Flame Red & Gold Darwin Hybrid Tulip
+  {
+    id: 101, type: 'goblet',
+    x: -0.08, y: -0.34, z: 0.56, scale: 0.92, rot: -0.18,
+    baseCol: [215, 24, 32], midCol: [245, 85, 25], rimCol: [255, 225, 75], cavityCol: [28, 4, 6],
+    stemEnd: { x: -0.03, y: 0.35 }
+  },
+  // 2. Crown Top-Center Right: Royal Violet-Purple Triumph Tulip
+  {
+    id: 102, type: 'goblet',
+    x: 0.07, y: -0.33, z: 0.58, scale: 0.90, rot: 0.20,
+    baseCol: [88, 18, 135], midCol: [148, 48, 205], rimCol: [232, 175, 255], cavityCol: [18, 2, 32],
+    stemEnd: { x: 0.02, y: 0.35 }
+  },
+  // 3. Upper-Left Outer: Pastel Blush Pink & Ivory Cupped Tulip
+  {
+    id: 103, type: 'goblet',
+    x: -0.25, y: -0.04, z: 0.62, scale: 0.88, rot: -0.52,
+    baseCol: [215, 72, 128], midCol: [248, 152, 188], rimCol: [255, 240, 246], cavityCol: [38, 6, 18],
+    stemEnd: { x: -0.06, y: 0.36 }
+  },
+  // 4. Upper-Right Outer: Luminous Cream-Yellow & Buttercup Tulip
+  {
+    id: 104, type: 'goblet',
+    x: 0.25, y: -0.03, z: 0.64, scale: 0.88, rot: 0.48,
+    baseCol: [225, 155, 18], midCol: [250, 218, 72], rimCol: [255, 252, 205], cavityCol: [42, 24, 4],
+    stemEnd: { x: 0.06, y: 0.36 }
+  },
+  // 5. Lower-Left Nested: Deep Velvet Magenta & Rose Parrot Tulip
+  {
+    id: 105, type: 'goblet',
+    x: -0.22, y: 0.17, z: 0.72, scale: 0.86, rot: -0.58,
+    baseCol: [162, 12, 82], midCol: [222, 42, 122], rimCol: [255, 182, 218], cavityCol: [24, 2, 14],
+    stemEnd: { x: -0.05, y: 0.38 }
+  },
+  // 6. Mid-Center Nested between Lilies: Flame Orange-Gold Tulip
+  {
+    id: 106, type: 'goblet',
+    x: 0.01, y: 0.02, z: 0.74, scale: 0.82, rot: 0.08,
+    baseCol: [198, 32, 18], midCol: [245, 112, 32], rimCol: [255, 232, 115], cavityCol: [28, 4, 2],
+    stemEnd: { x: 0.0, y: 0.36 }
+  },
+  // 7. Top-Left Arched Emerging Tulip Bud: Blush Rose & Emerald Sepal
+  {
+    id: 107, type: 'bud',
+    x: -0.21, y: -0.30, z: 0.38, scale: 0.78, rot: -0.45,
+    baseCol: [72, 148, 68], midCol: [235, 88, 138], rimCol: [255, 222, 235], cavityCol: [24, 8, 14],
+    stemEnd: { x: -0.05, y: 0.34 }
+  },
+  // 8. Top-Right Arched Emerging Tulip Bud: Royal Purple & Gold Tipped Bud
+  {
+    id: 108, type: 'bud',
+    x: 0.21, y: -0.29, z: 0.40, scale: 0.78, rot: 0.46,
+    baseCol: [68, 142, 64], midCol: [165, 58, 215], rimCol: [248, 215, 255], cavityCol: [22, 4, 32],
+    stemEnd: { x: 0.05, y: 0.34 }
+  }
+];
+
+/**
+ * Helper to stamp Z-depth onto the parallel depth canvas whenever we paint a shape
+ */
+function setDepthColor(zVal) {
+  const g = Math.max(1, Math.min(255, Math.round(zVal * 255)));
+  depthCtx.fillStyle = `rgb(${g},${g},${g})`;
+  depthCtx.strokeStyle = `rgb(${g},${g},${g})`;
+}
+
+/**
+ * ============================================================================
+ * PAINT 3D SCULPTED GOBLET TULIP OR ARCHED BUD
+ * Features dark inner cup cavity, 3 back inner petals, 3 overlapping concave
+ * outer petals with cylindrical Phong belly lighting from top-left, deep
+ * ambient occlusion seams, and razor-sharp bright rim lip.
+ * ============================================================================
+ */
+function paint3DTulip(pCtx, dCtx, cx, cy, baseRadius, tulip) {
+  const tx = cx + tulip.x * baseRadius * 2.0;
+  const ty = cy + tulip.y * baseRadius * 2.0;
+  const cupH = baseRadius * 0.21 * tulip.scale;
+  const cupW = baseRadius * 0.145 * tulip.scale;
+
+  // Draw graceful arched 3D cylindrical stem connecting tulip to bouquet gather point
+  const endX = cx + tulip.stemEnd.x * baseRadius * 2.0;
+  const endY = cy + tulip.stemEnd.y * baseRadius * 2.0;
+  const ctrlX = tx + Math.sin(tulip.rot) * baseRadius * 0.28;
+  const ctrlY = (ty + endY) * 0.5;
+
+  pCtx.save();
+  pCtx.lineCap = 'round';
+  // Stem ambient shadow
+  pCtx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
+  pCtx.lineWidth = 7.5;
+  pCtx.beginPath();
+  pCtx.moveTo(tx, ty + cupH * 0.35);
+  pCtx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
+  pCtx.stroke();
+
+  // Stem cylindrical shaded body
+  pCtx.strokeStyle = 'rgb(46, 118, 52)';
+  pCtx.lineWidth = 5.0;
+  pCtx.stroke();
+
+  // Stem bright top-left specular ridge
+  pCtx.strokeStyle = 'rgb(142, 222, 128)';
+  pCtx.lineWidth = 1.6;
+  pCtx.beginPath();
+  pCtx.moveTo(tx - 1.5, ty + cupH * 0.35);
+  pCtx.quadraticCurveTo(ctrlX - 1.5, ctrlY, endX - 1.5, endY);
+  pCtx.stroke();
+  pCtx.restore();
+
+  // Stamp stem depth
+  dCtx.save();
+  setDepthColor(tulip.z * 0.85);
+  dCtx.lineWidth = 6;
+  dCtx.beginPath();
+  dCtx.moveTo(tx, ty + cupH * 0.35);
+  dCtx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
+  dCtx.stroke();
+  dCtx.restore();
+
+  // Translate to Tulip Cup Center
+  pCtx.save();
+  pCtx.translate(tx, ty);
+  pCtx.rotate(tulip.rot);
+
+  dCtx.save();
+  dCtx.translate(tx, ty);
+  dCtx.rotate(tulip.rot);
+  setDepthColor(tulip.z);
+
+  // 1. Ambient Occlusion Halo behind Tulip Goblet
+  const aoGrad = pCtx.createRadialGradient(0, 4, cupW * 0.2, 0, 4, cupH * 0.95);
+  aoGrad.addColorStop(0, 'rgba(0, 0, 0, 0.78)');
+  aoGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  pCtx.fillStyle = aoGrad;
+  pCtx.beginPath();
+  pCtx.arc(0, 4, cupH * 0.95, 0, Math.PI * 2);
+  pCtx.fill();
+
+  if (tulip.type === 'bud') {
+    // Sculpted Half-Opened Tulip Bud
+    const bW = cupW * 0.68;
+    const bH = cupH * 0.92;
+
+    const budGrad = pCtx.createLinearGradient(-bW, -bH * 0.5, bW, bH * 0.5);
+    budGrad.addColorStop(0, `rgb(${tulip.rimCol[0]}, ${tulip.rimCol[1]}, ${tulip.rimCol[2]})`);
+    budGrad.addColorStop(0.45, `rgb(${tulip.midCol[0]}, ${tulip.midCol[1]}, ${tulip.midCol[2]})`);
+    budGrad.addColorStop(1, `rgb(${tulip.baseCol[0]}, ${tulip.baseCol[1]}, ${tulip.baseCol[2]})`);
+
+    pCtx.fillStyle = budGrad;
+    pCtx.beginPath();
+    pCtx.moveTo(0, bH * 0.45);
+    pCtx.bezierCurveTo(-bW * 1.2, bH * 0.2, -bW * 0.95, -bH * 0.55, 0, -bH * 0.65);
+    pCtx.bezierCurveTo(bW * 0.95, -bH * 0.55, bW * 1.2, bH * 0.2, 0, bH * 0.45);
+    pCtx.fill();
+
+    dCtx.beginPath();
+    dCtx.moveTo(0, bH * 0.45);
+    dCtx.bezierCurveTo(-bW * 1.2, bH * 0.2, -bW * 0.95, -bH * 0.55, 0, -bH * 0.65);
+    dCtx.bezierCurveTo(bW * 0.95, -bH * 0.55, bW * 1.2, bH * 0.2, 0, bH * 0.45);
+    dCtx.fill();
+
+    // Crisp rim highlight on overlapping bud seam
+    pCtx.strokeStyle = `rgb(${tulip.rimCol[0]}, ${tulip.rimCol[1]}, ${tulip.rimCol[2]})`;
+    pCtx.lineWidth = 2.0;
+    pCtx.stroke();
+
+    pCtx.restore();
+    dCtx.restore();
+    return;
+  }
+
+  // 2. Dark 3D Interior Goblet Cavity at Top Opening
+  const [cr, cg, cb] = tulip.cavityCol;
+  pCtx.fillStyle = `rgb(${cr}, ${cg}, ${cb})`;
+  pCtx.beginPath();
+  pCtx.ellipse(0, -cupH * 0.36, cupW * 0.72, cupH * 0.22, 0, 0, Math.PI * 2);
+  pCtx.fill();
+
+  // 3. Three Inner Back Petals Peeking Above Cavity
+  const innerOffsets = [-0.42, 0, 0.42];
+  innerOffsets.forEach((off, idx) => {
+    const px = off * cupW;
+    const py = -cupH * (idx === 1 ? 0.56 : 0.48);
+    const pw = cupW * 0.48;
+    const ph = cupH * 0.55;
+
+    const inGrad = pCtx.createLinearGradient(px, py, px, py + ph);
+    inGrad.addColorStop(0, `rgb(${tulip.rimCol[0]}, ${tulip.rimCol[1]}, ${tulip.rimCol[2]})`);
+    inGrad.addColorStop(0.5, `rgb(${tulip.midCol[0]}, ${tulip.midCol[1]}, ${tulip.midCol[2]})`);
+    inGrad.addColorStop(1, `rgb(${cr}, ${cg}, ${cb})`);
+
+    pCtx.fillStyle = inGrad;
+    pCtx.beginPath();
+    pCtx.moveTo(px - pw, py + ph * 0.75);
+    pCtx.quadraticCurveTo(px, py - ph * 0.35, px + pw, py + ph * 0.75);
+    pCtx.closePath();
+    pCtx.fill();
+
+    // Bright top lip of inner petal
+    pCtx.strokeStyle = `rgba(${tulip.rimCol[0]}, ${tulip.rimCol[1]}, ${tulip.rimCol[2]}, 0.85)`;
+    pCtx.lineWidth = 1.6;
+    pCtx.stroke();
+  });
+
+  // 4. Three Front Overlapping Concave Cupped Petals (Left, Right, Center-Front)
+  const frontPetals = [
+    { xOff: -cupW * 0.38, rot: -0.14, wScale: 0.68, hScale: 0.94, lightBias: 1.12 },
+    { xOff:  cupW * 0.38, rot:  0.14, wScale: 0.68, hScale: 0.94, lightBias: 0.84 },
+    { xOff:  0,           rot:  0.00, wScale: 0.76, hScale: 1.00, lightBias: 1.05 }
+  ];
+
+  frontPetals.forEach((fp) => {
+    pCtx.save();
+    pCtx.translate(fp.xOff, 0);
+    pCtx.rotate(fp.rot);
+
+    const pw = cupW * fp.wScale;
+    const ph = cupH * fp.hScale;
+
+    // Ambient occlusion shadow cast onto underlying petals
+    pCtx.fillStyle = 'rgba(0, 0, 0, 0.52)';
+    pCtx.beginPath();
+    pCtx.moveTo(0, ph * 0.48);
+    pCtx.bezierCurveTo(-pw * 1.25, ph * 0.32, -pw * 1.15, -ph * 0.38, 0, -ph * 0.48);
+    pCtx.bezierCurveTo(pw * 1.15, -ph * 0.38, pw * 1.25, ph * 0.32, 0, ph * 0.48);
+    pCtx.fill();
+
+    // Vertical Cupped Gradient (Bright Rim Lip -> Mid Belly -> Deep Shaded Base)
+    const vGrad = pCtx.createLinearGradient(0, -ph * 0.46, 0, ph * 0.46);
+    const lb = fp.lightBias;
+    vGrad.addColorStop(0.0, `rgb(${Math.min(255, tulip.rimCol[0] * lb)}, ${Math.min(255, tulip.rimCol[1] * lb)}, ${Math.min(255, tulip.rimCol[2] * lb)})`);
+    vGrad.addColorStop(0.32, `rgb(${Math.min(255, tulip.midCol[0] * lb)}, ${Math.min(255, tulip.midCol[1] * lb)}, ${Math.min(255, tulip.midCol[2] * lb)})`);
+    vGrad.addColorStop(0.82, `rgb(${Math.min(255, tulip.baseCol[0] * lb)}, ${Math.min(255, tulip.baseCol[1] * lb)}, ${Math.min(255, tulip.baseCol[2] * lb)})`);
+    vGrad.addColorStop(1.0, `rgb(${(tulip.baseCol[0] * 0.45) | 0}, ${(tulip.baseCol[1] * 0.45) | 0}, ${(tulip.baseCol[2] * 0.45) | 0})`);
+
+    pCtx.fillStyle = vGrad;
+    pCtx.beginPath();
+    pCtx.moveTo(0, ph * 0.45);
+    pCtx.bezierCurveTo(-pw * 1.18, ph * 0.28, -pw * 1.08, -ph * 0.36, 0, -ph * 0.45);
+    pCtx.bezierCurveTo(pw * 1.08, -ph * 0.36, pw * 1.18, ph * 0.28, 0, ph * 0.45);
+    pCtx.closePath();
+    pCtx.fill();
+
+    // Stamp onto Z-depth buffer
+    dCtx.save();
+    dCtx.translate(fp.xOff, 0);
+    dCtx.rotate(fp.rot);
+    dCtx.beginPath();
+    dCtx.moveTo(0, ph * 0.45);
+    dCtx.bezierCurveTo(-pw * 1.18, ph * 0.28, -pw * 1.08, -ph * 0.36, 0, -ph * 0.45);
+    dCtx.bezierCurveTo(pw * 1.08, -ph * 0.36, pw * 1.18, ph * 0.28, 0, ph * 0.45);
+    dCtx.fill();
+    dCtx.restore();
+
+    // Cylindrical Phong Belly Highlight (Top-Left studio light source)
+    const phongGrad = pCtx.createRadialGradient(-pw * 0.22, -ph * 0.08, pw * 0.08, 0, 0, pw * 1.05);
+    phongGrad.addColorStop(0.0, 'rgba(255, 255, 255, 0.34)');
+    phongGrad.addColorStop(0.45, 'rgba(255, 255, 255, 0.05)');
+    phongGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0.38)');
+    pCtx.fillStyle = phongGrad;
+    pCtx.fill();
+
+    // Crisp Luminous Curved Top Lip Rim
+    pCtx.strokeStyle = `rgb(${tulip.rimCol[0]}, ${tulip.rimCol[1]}, ${tulip.rimCol[2]})`;
+    pCtx.lineWidth = 2.1;
+    pCtx.stroke();
+
+    pCtx.restore();
+  });
+
+  // Receptacle / Calyx Green Base Cup Join
+  pCtx.fillStyle = 'rgb(62, 148, 64)';
+  pCtx.beginPath();
+  pCtx.ellipse(0, cupH * 0.44, cupW * 0.32, cupH * 0.09, 0, 0, Math.PI * 2);
+  pCtx.fill();
+
+  pCtx.restore();
+  dCtx.restore();
+}
+
+/**
+ * ============================================================================
+ * PAINT 3D SCULPTED RECURVED LILY TEPAL (PETAL)
+ * Features 3D foreshortening, deep throat shadow (#1a0208), rich midtones,
+ * bright specular central midrib ridge, ruffled picotee white/light edge,
+ * and raised dark crimson papillae speckles.
+ * ============================================================================
+ */
+function paint3DLilyTepal(pCtx, dCtx, length, width, angle, foreshorten, lily, petalIdx, isInnerWhorl) {
+  pCtx.save();
+  pCtx.rotate(angle);
+  pCtx.scale(1.0, foreshorten);
+
+  dCtx.save();
+  dCtx.rotate(angle);
+  dCtx.scale(1.0, foreshorten);
+  setDepthColor(lily.z + (isInnerWhorl ? 0.04 : 0.0));
+
+  // 1. Deep Ambient Occlusion Cast Shadow onto Outer Whorl Petals
+  if (isInnerWhorl) {
+    pCtx.save();
+    pCtx.translate(4, 6);
+    pCtx.fillStyle = 'rgba(0, 0, 0, 0.62)';
+    pCtx.beginPath();
+    pCtx.moveTo(0, 0);
+    pCtx.bezierCurveTo(-width * 1.04, -length * 0.30, -width * 0.88, -length * 0.78, 0, -length * 1.03);
+    pCtx.bezierCurveTo(width * 0.88, -length * 0.78, width * 1.04, -length * 0.30, 0, 0);
+    pCtx.fill();
+    pCtx.restore();
+  }
+
+  // 2. Longitudinal 3D Tepal Gradient (Deep Cup Shadow #1a0208 -> Throat -> Rich Mid -> Recurved Tip)
+  const grad = pCtx.createLinearGradient(0, 0, 0, -length);
+  const [cr, cg, cb] = lily.cupCol;
+  const [ir, ig, ib] = lily.innerCol;
+  const [mr, mg, mb] = lily.midCol;
+  const [tr, tg, tb] = lily.tipCol;
+  const [rmr, rmg, rmb] = lily.rimCol;
+
+  grad.addColorStop(0.00, `rgb(${cr}, ${cg}, ${cb})`);
+  grad.addColorStop(0.11, `rgb(${ir}, ${ig}, ${ib})`);
+  grad.addColorStop(0.32, `rgb(${mr}, ${mg}, ${mb})`);
+  grad.addColorStop(0.76, `rgb(${tr}, ${tg}, ${tb})`);
+  grad.addColorStop(1.00, `rgb(${rmr}, ${rmg}, ${rmb})`);
+
+  // Sculpted Recurved Wavy Tepal Path
+  pCtx.beginPath();
+  pCtx.moveTo(0, 0);
+  pCtx.bezierCurveTo(
+    -width * 0.96, -length * 0.26,
+    -width * 1.08, -length * 0.64,
+    0, -length
+  );
+  pCtx.bezierCurveTo(
+    width * 1.08, -length * 0.64,
+    width * 0.96, -length * 0.26,
+    0, 0
+  );
+  pCtx.closePath();
+  pCtx.fillStyle = grad;
+  pCtx.fill();
+
+  // Stamp tepal silhouette into Z-buffer
+  dCtx.beginPath();
+  dCtx.moveTo(0, 0);
+  dCtx.bezierCurveTo(-width * 0.96, -length * 0.26, -width * 1.08, -length * 0.64, 0, -length);
+  dCtx.bezierCurveTo(width * 1.08, -length * 0.64, width * 0.96, -length * 0.26, 0, 0);
+  dCtx.closePath();
+  dCtx.fill();
+
+  // 3. 3D Cylindrical Lateral Curvature Shading (Chiaroscuro across petal width)
+  const sideGrad = pCtx.createLinearGradient(-width, -length * 0.5, width, -length * 0.5);
+  sideGrad.addColorStop(0.00, 'rgba(0, 0, 0, 0.42)');
+  sideGrad.addColorStop(0.24, 'rgba(255, 255, 255, 0.22)');
+  sideGrad.addColorStop(0.48, 'rgba(0, 0, 0, 0.26)'); // Deep central midrib channel
+  sideGrad.addColorStop(0.52, 'rgba(255, 255, 255, 0.32)'); // Specular ridge next to channel
+  sideGrad.addColorStop(0.78, 'rgba(255, 255, 255, 0.18)');
+  sideGrad.addColorStop(1.00, 'rgba(0, 0, 0, 0.45)');
+  pCtx.fillStyle = sideGrad;
+  pCtx.fill();
+
+  // 4. Ruffled Wavy White/Light Picotee Rim Edge (Crucial for Sobel contour detector!)
+  pCtx.strokeStyle = `rgb(${rmr}, ${rmg}, ${rmb})`;
+  pCtx.lineWidth = isInnerWhorl ? 2.4 : 1.9;
+  pCtx.stroke();
+
+  // 5. Bright Specular Ridge Running Along Central Midrib Vein
+  const [rr, rg, rb] = lily.ribCol;
+  pCtx.strokeStyle = `rgb(${rr}, ${rg}, ${rb})`;
+  pCtx.lineWidth = 2.4;
+  pCtx.beginPath();
+  pCtx.moveTo(0, -length * 0.05);
+  pCtx.lineTo(0, -length * 0.93);
+  pCtx.stroke();
+
+  // Dark micro-shadow line right beside the midrib for extreme 3D relief
+  pCtx.strokeStyle = 'rgba(12, 2, 6, 0.55)';
+  pCtx.lineWidth = 1.1;
+  pCtx.beginPath();
+  pCtx.moveTo(-1.8, -length * 0.05);
+  pCtx.lineTo(-1.2, -length * 0.88);
+  pCtx.stroke();
+
+  // Parallel Botanical Lateral Veins
+  for (let v = -3; v <= 3; v++) {
+    if (v === 0) continue;
+    pCtx.strokeStyle = v % 2 === 0 ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.26)';
+    pCtx.lineWidth = 0.95;
+    pCtx.beginPath();
+    pCtx.moveTo(v * 1.6, -length * 0.10);
+    pCtx.quadraticCurveTo(v * (width * 0.24), -length * 0.52, v * 2.4, -length * 0.88);
+    pCtx.stroke();
+  }
+
+  // 6. Raised Dark Crimson Papillae Speckles with 3D Micro-Highlight
+  const [sr, sg, sb] = lily.spotCol;
+  let seed = lily.id * 131 + petalIdx * 29;
+  const numSpots = 32;
+  for (let s = 0; s < numSpots; s++) {
+    const t = 0.12 + seededRandom(seed++) * 0.56;
+    const py = -length * t;
+    const maxSpread = width * Math.sin(t * Math.PI) * 0.72;
+    const px = (seededRandom(seed++) - 0.5) * 2 * maxSpread;
+    const rad = 1.2 + seededRandom(seed++) * 1.7;
+
+    // Dark crimson papillae spot
+    pCtx.fillStyle = `rgb(${sr}, ${sg}, ${sb})`;
+    pCtx.beginPath();
+    pCtx.arc(px, py, rad, 0, Math.PI * 2);
+    pCtx.fill();
+
+    // Tiny bright rim dot on papillae for 3D bump texture
+    pCtx.fillStyle = 'rgba(255, 230, 220, 0.55)';
+    pCtx.beginPath();
+    pCtx.arc(px - 0.6, py - 0.6, rad * 0.42, 0, Math.PI * 2);
+    pCtx.fill();
+  }
+
+  pCtx.restore();
+  dCtx.restore();
+}
+
+/**
+ * ============================================================================
+ * PAINT 3D CURVING LILY FILAMENTS, PLUSH RUST-ORANGE T-SHAPED ANTHERS & STIGMA
+ * ============================================================================
+ */
+function paint3DLilyReproductiveCrown(pCtx, dCtx, lily, radiusScale) {
+  let seed = lily.id * 97;
+
+  // 1. Deep Chiaroscuro Throat Shadow Cup (#1a0208)
+  const cupGrad = pCtx.createRadialGradient(0, 0, 1, 0, 0, 22 * radiusScale);
+  cupGrad.addColorStop(0.0, 'rgb(20, 2, 8)');
+  cupGrad.addColorStop(0.55, 'rgba(35, 10, 14, 0.75)');
+  cupGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+  pCtx.fillStyle = cupGrad;
+  pCtx.beginPath();
+  pCtx.arc(0, 0, 22 * radiusScale, 0, Math.PI * 2);
+  pCtx.fill();
+
+  setDepthColor(Math.min(1.0, lily.z + 0.08));
+
+  // 2. Six Long Curving 3D Filaments + Plush Rust-Orange T-Shaped Pollen Anthers
+  for (let i = 0; i < 6; i++) {
+    const baseAngle = (i * Math.PI * 2) / 6 + 0.22 + (seededRandom(seed++) - 0.5) * 0.18;
+    const filLen = (40 + seededRandom(seed++) * 14) * radiusScale;
+    const endX = Math.cos(baseAngle) * filLen;
+    const endY = Math.sin(baseAngle) * filLen * 0.78 - 8 * radiusScale;
+    const ctrlX = Math.cos(baseAngle) * filLen * 0.46;
+    const ctrlY = Math.sin(baseAngle) * filLen * 0.34 + 6 * radiusScale;
+
+    // Cast shadow of curving filament
+    pCtx.strokeStyle = 'rgba(0, 0, 0, 0.72)';
+    pCtx.lineWidth = 3.4 * radiusScale;
+    pCtx.beginPath();
+    pCtx.moveTo(0, 0);
+    pCtx.quadraticCurveTo(ctrlX + 1.5, ctrlY + 2.5, endX + 1.5, endY + 2.5);
+    pCtx.stroke();
+
+    // Luminous Pale-Green / Ivory 3D Filament
+    pCtx.strokeStyle = 'rgb(228, 248, 168)';
+    pCtx.lineWidth = 2.0 * radiusScale;
+    pCtx.beginPath();
+    pCtx.moveTo(0, 0);
+    pCtx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
+    pCtx.stroke();
+
+    dCtx.lineWidth = 3.0 * radiusScale;
+    dCtx.beginPath();
+    dCtx.moveTo(0, 0);
+    dCtx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
+    dCtx.stroke();
+
+    // Plush Rust-Orange T-Shaped Pollen Anther
+    const tAngle = baseAngle + Math.PI * 0.48;
+    pCtx.save();
+    pCtx.translate(endX, endY);
+    pCtx.rotate(tAngle);
+
+    // Anther shadow
+    pCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    pCtx.beginPath();
+    pCtx.ellipse(1, 2, 7.2 * radiusScale, 2.6 * radiusScale, 0, 0, Math.PI * 2);
+    pCtx.fill();
+
+    // Plush Velvet Rust-Orange Body
+    pCtx.fillStyle = 'rgb(188, 52, 16)';
+    pCtx.beginPath();
+    pCtx.ellipse(0, 0, 6.8 * radiusScale, 2.4 * radiusScale, 0, 0, Math.PI * 2);
+    pCtx.fill();
+
+    // Bright Golden-Amber Pollen Ridge along T-bar
+    pCtx.fillStyle = 'rgb(255, 198, 58)';
+    pCtx.beginPath();
+    pCtx.ellipse(0, -0.6 * radiusScale, 5.6 * radiusScale, 1.1 * radiusScale, 0, 0, Math.PI * 2);
+    pCtx.fill();
+
+    pCtx.restore();
+  }
+
+  // 3. Central Protruding Style & 3-Lobed Pistachio Stigma
+  const stigX = 3 * radiusScale;
+  const stigY = -32 * radiusScale;
+
+  pCtx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
+  pCtx.lineWidth = 4.0 * radiusScale;
+  pCtx.beginPath();
+  pCtx.moveTo(1, 2);
+  pCtx.quadraticCurveTo(5 * radiusScale, -14 * radiusScale, stigX + 1, stigY + 2);
+  pCtx.stroke();
+
+  pCtx.strokeStyle = 'rgb(188, 238, 118)';
+  pCtx.lineWidth = 2.7 * radiusScale;
+  pCtx.beginPath();
+  pCtx.moveTo(0, 0);
+  pCtx.quadraticCurveTo(4 * radiusScale, -15 * radiusScale, stigX, stigY);
+  pCtx.stroke();
+
+  // 3-Lobed Pistachio Stigma Crest
+  const lobes = [
+    { dx: -2.6, dy: -1.2 },
+    { dx:  2.6, dy: -1.2 },
+    { dx:  0.0, dy:  2.2 }
+  ];
+  lobes.forEach(l => {
+    pCtx.fillStyle = 'rgb(218, 252, 138)';
+    pCtx.beginPath();
+    pCtx.arc(stigX + l.dx * radiusScale, stigY + l.dy * radiusScale, 2.6 * radiusScale, 0, Math.PI * 2);
+    pCtx.fill();
+  });
+}
+
+/**
+ * ============================================================================
+ * PAINT BABY'S BREATH (GYPSOPHILA) SPRIGS & GLOWING FLORET CLUSTERS
+ * ============================================================================
+ */
+function paintBabysBreathClusters(pCtx, dCtx, cx, cy, baseRadius) {
+  const clusters = [
+    { x: -0.26, y: -0.22, z: 0.34, count: 18 },
+    { x:  0.26, y: -0.21, z: 0.34, count: 18 },
+    { x: -0.15, y: -0.37, z: 0.36, count: 15 },
+    { x:  0.15, y: -0.36, z: 0.36, count: 15 },
+    { x:  0.00, y: -0.39, z: 0.35, count: 16 },
+    { x: -0.29, y:  0.06, z: 0.42, count: 16 },
+    { x:  0.29, y:  0.05, z: 0.42, count: 16 },
+    { x: -0.16, y:  0.29, z: 0.65, count: 14 },
+    { x:  0.15, y:  0.28, z: 0.65, count: 14 }
+  ];
+
+  let seed = 901;
+  clusters.forEach((c) => {
+    const bx = cx + c.x * baseRadius * 2.0;
+    const by = cy + c.y * baseRadius * 2.0;
+    const spread = baseRadius * 0.13;
+
+    setDepthColor(c.z);
+
+    // Delicate branching green twigs
+    pCtx.strokeStyle = 'rgba(95, 168, 95, 0.52)';
+    pCtx.lineWidth = 1.1;
+    for (let i = 0; i < c.count; i++) {
+      const fx = bx + (seededRandom(seed++) - 0.5) * spread * 2.0;
+      const fy = by + (seededRandom(seed++) - 0.5) * spread * 1.6;
+
+      pCtx.beginPath();
+      pCtx.moveTo(bx, by + spread * 0.5);
+      pCtx.lineTo(fx, fy);
+      pCtx.stroke();
+
+      // Glowing white & warm gold micro-floret
+      const isGold = i % 3 === 0;
+      pCtx.fillStyle = isGold ? 'rgb(255, 242, 175)' : 'rgb(252, 252, 255)';
+      const rad = 1.8 + seededRandom(seed++) * 1.6;
+      pCtx.beginPath();
+      pCtx.arc(fx, fy, rad, 0, Math.PI * 2);
+      pCtx.fill();
+
+      dCtx.beginPath();
+      dCtx.arc(fx, fy, rad, 0, Math.PI * 2);
+      dCtx.fill();
+    }
+  });
+}
+
+/**
+ * ============================================================================
+ * BUILD COMPLETE 3D BOUQUET OFFSCREEN CANVAS + Z-DEPTH BUFFER + ASCII SHADER
+ * ============================================================================
+ */
+function build3DBouquetAndAsciiGrid() {
+  paintCanvas.width = W;
+  paintCanvas.height = H;
+  depthCanvas.width = W;
+  depthCanvas.height = H;
+
+  paintCtx.fillStyle = '#000000';
+  paintCtx.fillRect(0, 0, W, H);
+
+  depthCtx.fillStyle = '#000000';
+  depthCtx.fillRect(0, 0, W, H);
+
+  const cx = W * 0.5;
+  const cy = H * 0.47;
+  const baseRadius = Math.min(W, H) * 0.43;
+  const gatherY = cy + baseRadius * 0.54;
+  const stemBottomY = cy + baseRadius * 0.94;
+
+  // -------------------------------------------------------------------------
+  // STAGE 1: SWORD-SHAPED LILY LEAVES & BROAD GLAUCOUS CURVING TULIP LEAVES
+  // -------------------------------------------------------------------------
+  setDepthColor(0.22);
+
+  // 1A. Broad Curving Glaucous Sage-Green Tulip Leaves framing the bouquet
+  const tulipLeaves = [
+    { x: -0.22, y: 0.25, angle: -0.72, len: 0.44, wid: 24 },
+    { x: -0.14, y: 0.34, angle: -0.48, len: 0.42, wid: 26 },
+    { x:  0.22, y: 0.24, angle:  0.70, len: 0.44, wid: 24 },
+    { x:  0.14, y: 0.34, angle:  0.46, len: 0.42, wid: 26 },
+    { x: -0.27, y: -0.12, angle: -0.88, len: 0.38, wid: 22 },
+    { x:  0.27, y: -0.11, angle:  0.86, len: 0.38, wid: 22 }
+  ];
+
+  tulipLeaves.forEach((tl, idx) => {
+    const lx = cx + tl.x * baseRadius * 1.9;
+    const ly = cy + tl.y * baseRadius * 1.9;
+    const lLen = baseRadius * tl.len;
+    const lWid = tl.wid * (baseRadius / 340);
+
+    paintCtx.save();
+    paintCtx.translate(lx, ly);
+    paintCtx.rotate(tl.angle);
+
+    const leafGrad = paintCtx.createLinearGradient(-lWid, 0, lWid, -lLen);
+    leafGrad.addColorStop(0.0, 'rgb(22, 64, 38)');
+    leafGrad.addColorStop(0.5, idx % 2 === 0 ? 'rgb(64, 148, 88)' : 'rgb(52, 132, 78)');
+    leafGrad.addColorStop(1.0, 'rgb(148, 218, 152)');
+
+    paintCtx.fillStyle = leafGrad;
+    paintCtx.beginPath();
+    paintCtx.moveTo(0, 0);
+    paintCtx.bezierCurveTo(-lWid * 1.3, -lLen * 0.35, -lWid * 0.9, -lLen * 0.82, 0, -lLen);
+    paintCtx.bezierCurveTo(lWid * 0.9, -lLen * 0.82, lWid * 1.3, -lLen * 0.35, 0, 0);
+    paintCtx.fill();
+
+    // Bright glaucous leaf edge rim
+    paintCtx.strokeStyle = 'rgba(188, 242, 182, 0.65)';
+    paintCtx.lineWidth = 1.6;
+    paintCtx.stroke();
+
+    paintCtx.restore();
+  });
+
+  // 1B. Emerald & Forest Sword-Shaped Lily Leaves radiating around the collar
+  for (let i = 0; i < 26; i++) {
+    const t = i / 25;
+    const angle = (t - 0.5) * 1.85;
+    const leafLen = baseRadius * (0.36 + (i % 5) * 0.06);
+    const startX = cx + (t - 0.5) * baseRadius * 0.42;
+    const startY = gatherY + ((i % 4) - 1.5) * 16;
+
+    paintCtx.save();
+    paintCtx.translate(startX, startY);
+    paintCtx.rotate(angle);
+
+    const lGrad = paintCtx.createLinearGradient(0, 0, 0, -leafLen);
+    const bright = i % 2 === 0;
+    lGrad.addColorStop(0.0, 'rgb(14, 42, 18)');
+    lGrad.addColorStop(0.55, bright ? 'rgb(48, 136, 54)' : 'rgb(32, 96, 38)');
+    lGrad.addColorStop(1.0, bright ? 'rgb(122, 208, 98)' : 'rgb(74, 156, 68)');
+
+    paintCtx.fillStyle = lGrad;
+    paintCtx.beginPath();
+    paintCtx.moveTo(0, 0);
+    paintCtx.bezierCurveTo(-11, -leafLen * 0.36, -7, -leafLen * 0.78, 0, -leafLen);
+    paintCtx.bezierCurveTo(7, -leafLen * 0.78, 11, -leafLen * 0.36, 0, 0);
+    paintCtx.fill();
+
+    // Crisp central leaf rib
+    paintCtx.strokeStyle = 'rgba(178, 242, 148, 0.55)';
+    paintCtx.lineWidth = 1.2;
+    paintCtx.beginPath();
+    paintCtx.moveTo(0, 0);
+    paintCtx.lineTo(0, -leafLen * 0.92);
+    paintCtx.stroke();
+
+    paintCtx.restore();
+  }
+
+  // -------------------------------------------------------------------------
+  // STAGE 2: 26 INTERTWINED 3D CYLINDRICAL STEMS GATHERED AT HAND-TIED POINT
+  // -------------------------------------------------------------------------
+  let stemSeed = 404;
+  for (let s = -13; s <= 12; s++) {
+    const norm = s / 13;
+    const zVal = 0.25 + (1 - Math.abs(norm)) * 0.22;
+    setDepthColor(zVal);
+
+    // Fan out at top into bouquet crown, narrow at gather tie point, flare at cut ends
+    const topX = cx + norm * baseRadius * 0.44;
+    const topY = cy + baseRadius * 0.14;
+    const tieX = cx + norm * baseRadius * 0.14 + (seededRandom(stemSeed++) - 0.5) * 8;
+    const tieY = gatherY + (seededRandom(stemSeed++) - 0.5) * 10;
+    const botX = cx + norm * baseRadius * 0.26 + Math.sin(s * 1.3) * 7;
+    const botY = stemBottomY - Math.abs(norm) * baseRadius * 0.08;
+
+    // Dark ambient occlusion between intertwined stems
+    paintCtx.lineCap = 'round';
+    paintCtx.strokeStyle = 'rgb(8, 24, 10)';
+    paintCtx.lineWidth = 8.0;
+    paintCtx.beginPath();
+    paintCtx.moveTo(topX, topY);
+    paintCtx.quadraticCurveTo(tieX, tieY, botX, botY);
+    paintCtx.stroke();
+
+    // Cylindrical emerald stem body
+    const greenShade = s % 2 === 0 ? 'rgb(64, 158, 68)' : 'rgb(38, 114, 44)';
+    paintCtx.strokeStyle = greenShade;
+    paintCtx.lineWidth = 5.2;
+    paintCtx.stroke();
+
+    // Bright 3D cylindrical specular highlight along left side of stem
+    paintCtx.strokeStyle = 'rgb(168, 238, 138)';
+    paintCtx.lineWidth = 1.6;
+    paintCtx.beginPath();
+    paintCtx.moveTo(topX - 1.5, topY);
+    paintCtx.quadraticCurveTo(tieX - 1.5, tieY, botX - 1.5, botY);
+    paintCtx.stroke();
+
+    // Stamp stem into Z-buffer
+    depthCtx.lineWidth = 6.0;
+    depthCtx.beginPath();
+    depthCtx.moveTo(topX, topY);
+    depthCtx.quadraticCurveTo(tieX, tieY, botX, botY);
+    depthCtx.stroke();
+  }
+
+  // Subtle Artisanal Raffia / Ribbon Tie Binding the Stems at the Gathering Point
+  setDepthColor(0.52);
+  const bindW = baseRadius * 0.17;
+  paintCtx.strokeStyle = 'rgb(198, 158, 96)';
+  paintCtx.lineWidth = 3.5;
+  for (let b = -2; b <= 2; b++) {
+    paintCtx.beginPath();
+    paintCtx.moveTo(cx - bindW, gatherY + b * 3.5);
+    paintCtx.quadraticCurveTo(cx, gatherY + b * 3.5 + 5, cx + bindW, gatherY + b * 3.5);
+    paintCtx.stroke();
+  }
+
+  // -------------------------------------------------------------------------
+  // STAGE 3: BABY'S BREATH CLUSTERS FILLING NEGATIVE SPACE
+  // -------------------------------------------------------------------------
+  paintBabysBreathClusters(paintCtx, depthCtx, cx, cy, baseRadius);
+
+  // -------------------------------------------------------------------------
+  // STAGE 4: Z-SORTED PAINTER'S ALGORITHM FOR ALL 15 BLOOMS (8 TULIPS + 7 LILIES)
+  // -------------------------------------------------------------------------
+  const allBlooms = [
+    ...SCULPTED_TULIPS.map(t => ({ kind: 'tulip', z: t.z, data: t })),
+    ...HERO_LILIES.map(l => ({ kind: 'lily', z: l.z, data: l }))
+  ].sort((a, b) => a.z - b.z);
+
+  allBlooms.forEach(item => {
+    if (item.kind === 'tulip') {
+      paint3DTulip(paintCtx, depthCtx, cx, cy, baseRadius, item.data);
+    } else {
+      const lily = item.data;
+      const lx = cx + lily.x * baseRadius * 2.0;
+      const ly = cy + lily.y * baseRadius * 2.0;
+      const petalLen = baseRadius * 0.35 * lily.scale;
+      const petalWid = baseRadius * 0.118 * lily.scale;
+
+      paintCtx.save();
+      paintCtx.translate(lx, ly);
+      paintCtx.scale(lily.tiltX, lily.tiltY);
+      paintCtx.rotate(lily.rot);
+
+      depthCtx.save();
+      depthCtx.translate(lx, ly);
+      depthCtx.scale(lily.tiltX, lily.tiltY);
+      depthCtx.rotate(lily.rot);
+
+      // Deep 3D Ambient Occlusion Shadow behind entire Lily Blossom
+      const ambGrad = paintCtx.createRadialGradient(0, 8, petalLen * 0.12, 0, 8, petalLen * 1.02);
+      ambGrad.addColorStop(0.0, 'rgba(0, 0, 0, 0.78)');
+      ambGrad.addColorStop(0.7, 'rgba(0, 0, 0, 0.35)');
+      ambGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+      paintCtx.fillStyle = ambGrad;
+      paintCtx.beginPath();
+      paintCtx.arc(0, 8, petalLen * 1.02, 0, Math.PI * 2);
+      paintCtx.fill();
+
+      // Outer Whorl (3 Recurved Sepals with 3D perspective foreshortening)
+      for (let i = 0; i < 3; i++) {
+        const pAngle = (i * Math.PI * 2) / 3 + Math.PI / 3;
+        const foreshorten = 0.86 + 0.12 * Math.cos(pAngle);
+        paint3DLilyTepal(paintCtx, depthCtx, petalLen * 0.96, petalWid * 0.94, pAngle, foreshorten, lily, i, false);
+      }
+
+      // Inner Whorl (3 Broad Ruffled Petals with cast shadows & picotee rims)
+      for (let i = 0; i < 3; i++) {
+        const pAngle = (i * Math.PI * 2) / 3;
+        const foreshorten = 0.88 + 0.12 * Math.cos(pAngle);
+        paint3DLilyTepal(paintCtx, depthCtx, petalLen, petalWid * 1.10, pAngle, foreshorten, lily, i + 3, true);
+      }
+
+      // 6 Curving 3D Filaments, Plush Rust-Orange T-Shaped Anthers & 3-Lobed Stigma
+      paint3DLilyReproductiveCrown(paintCtx, depthCtx, lily, lily.scale * (baseRadius / 340));
+
+      paintCtx.restore();
+      depthCtx.restore();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // STAGE 5: HIGH-DEFINITION SOBEL CONTOUR & VOLUMETRIC ASCII SHADER
+  // -------------------------------------------------------------------------
+  const imgData = paintCtx.getImageData(0, 0, W, H).data;
+  const depthData = depthCtx.getImageData(0, 0, W, H).data;
+
+  const stepX = state.stepX;
+  const stepY = state.stepY;
+  const cols = Math.floor(W / stepX);
+  const rows = Math.floor(H / stepY);
+
+  asciiGrid = [];
+
+  // Authentic bounding box tracking variables (`ymin = 1e9, ymax = -1e9, maxw = 0`)
+  let xmin = 1e9, xmax = -1e9, ymin = 1e9, ymax = -1e9, maxw = 0;
+
+  for (let row = 0; row < rows; row++) {
+    const y = Math.floor(row * stepY + stepY * 0.5);
+    if (y < 2 || y >= H - 2) continue;
+
+    let rowMinX = 1e9, rowMaxX = -1e9;
+
+    for (let col = 0; col < cols; col++) {
+      const x = Math.floor(col * stepX + stepX * 0.5);
+      if (x < 2 || x >= W - 2) continue;
+
+      const idx = (y * W + x) * 4;
+      const r = imgData[idx];
+      const g = imgData[idx + 1];
+      const b = imgData[idx + 2];
+
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      if (lum < 0.038) continue;
+
+      // Update bounding box metrics
+      if (x < xmin) xmin = x;
+      if (x > xmax) xmax = x;
+      if (y < ymin) ymin = y;
+      if (y > ymax) ymax = y;
+      if (x < rowMinX) rowMinX = x;
+      if (x > rowMaxX) rowMaxX = x;
+
+      // Read 3D Z-depth (0..1)
+      const zDepth = depthData[idx] / 255;
+
+      // 3x3 Sobel Edge Gradient on both Luminance & Z-Depth for razor-sharp 3D petal contours
+      const lumAt = (px, py) => {
+        const i = (py * W + px) * 4;
+        return (0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2]) / 255;
+      };
+      const zAt = (px, py) => depthData[(py * W + px) * 4] / 255;
+
+      const tl = lumAt(x - 1, y - 1), tc = lumAt(x, y - 1), tr = lumAt(x + 1, y - 1);
+      const ml = lumAt(x - 1, y),                           mr = lumAt(x + 1, y);
+      const bl = lumAt(x - 1, y + 1), bc = lumAt(x, y + 1), br = lumAt(x + 1, y + 1);
+
+      const gx = (tr + 2 * mr + br) - (tl + 2 * ml + bl);
+      const gy = (bl + 2 * bc + br) - (tl + 2 * tc + tr);
+      const gradMag = Math.hypot(gx, gy);
+
+      const dzX = zAt(x + 1, y) - zAt(x - 1, y);
+      const dzY = zAt(x, y + 1) - zAt(x, y - 1);
+      const zEdgeMag = Math.hypot(dzX, dzY);
+
+      let char = '*';
+      let isContour = false;
+
+      // Strong petal rim, tulip cup lip, or overlapping 3D depth seam -> Directional Contour Glyph
+      if (gradMag > 0.36 || zEdgeMag > 0.12) {
+        isContour = true;
+        // Tangent direction along the contour edge is perpendicular to gradient (gx, gy)
+        const tangentAngle = Math.atan2(gx, -gy); // -PI..PI
+        const deg = ((tangentAngle * 180) / Math.PI + 180) % 180; // 0..180
+
+        if (deg >= 72 && deg <= 108) {
+          // Near-vertical contour: use curved parentheses '(' or ')' based on gradient sign
+          if (Math.abs(gx) > 0.45) {
+            char = gx > 0 ? '(' : ')';
+          } else {
+            char = '|';
+          }
+        } else if (deg < 24 || deg > 156) {
+          char = '_';
+        } else if (deg >= 24 && deg < 72) {
+          char = '/';
+        } else {
+          char = '\\';
+        }
+      } else {
+        // Interior volumetric 3D shading across @ % W M # 8 & $ * + = ~ - : .
+        const curvedLum = Math.pow(lum, 0.84);
+        const rIdx = Math.floor((1.0 - curvedLum) * (VOLUMETRIC_RAMP.length - 1));
+        char = VOLUMETRIC_RAMP[Math.max(0, Math.min(VOLUMETRIC_RAMP.length - 1, rIdx))];
+      }
+
+      asciiGrid.push({
+        x,
+        y,
+        z: zDepth,
+        r,
+        g,
+        b,
+        lum,
+        char,
+        isContour,
+        swayWeight: Math.max(0, (stemBottomY - y) / (baseRadius * 1.85)),
+        bloomOrder: (1.0 - (y - (cy - baseRadius)) / (baseRadius * 2.0)) * 0.45 + zDepth * 0.55
+      });
+    }
+
+    if (rowMaxX > rowMinX) {
+      const rw = rowMaxX - rowMinX;
+      if (rw > maxw) maxw = rw;
+    }
+  }
+
+  state.glyphCount = asciiGrid.length;
+  state.bbox = {
+    xmin: xmin === 1e9 ? 0 : xmin,
+    xmax: xmax === -1e9 ? 0 : xmax,
+    ymin: ymin === 1e9 ? 0 : ymin,
+    ymax: ymax === -1e9 ? 0 : ymax,
+    maxw
+  };
+
+  // Pre-render multi-pass CRT phosphor bloom buffer
+  glowCanvas.width = Math.max(1, Math.floor(W / 4));
+  glowCanvas.height = Math.max(1, Math.floor(H / 4));
+  glowCtx.clearRect(0, 0, glowCanvas.width, glowCanvas.height);
+  glowCtx.filter = 'blur(9px)';
+  glowCtx.drawImage(paintCanvas, 0, 0, glowCanvas.width, glowCanvas.height);
+}
+
+/**
+ * Initialize Cosmic Starfield & Rising Golden Pollen Motes
+ */
+function initParticles() {
+  stars.length = 0;
+  const starGlyphs = ['·', '.', '*', '+', '✦', '˚'];
+  const starCols = ['#ffffff', '#ffe4e6', '#fef3c7', '#e0f2fe', '#f3e8ff'];
+
+  for (let i = 0; i < 145; i++) {
+    stars.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      z: 0.05 + Math.random() * 0.2,
+      char: starGlyphs[Math.floor(Math.random() * starGlyphs.length)],
+      color: starCols[Math.floor(Math.random() * starCols.length)],
+      size: 8 + Math.floor(Math.random() * 6),
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.015 + Math.random() * 0.03,
+      driftY: -0.05 - Math.random() * 0.10
+    });
+  }
+
+  pollenParticles.length = 0;
+  for (let i = 0; i < 52; i++) {
+    pollenParticles.push(createPollenMote());
+  }
+}
+
+function createPollenMote(customX, customY) {
+  const cx = W * 0.5;
+  const cy = H * 0.46;
+  const spread = Math.min(W, H) * 0.35;
+  const glyphs = ['*', '·', '+', '✦', '.'];
+  const colors = ['#fde047', '#fb7185', '#fdba74', '#bef264', '#f9a8d4', '#ffffff'];
+
+  return {
+    x: customX !== undefined ? customX : cx + (Math.random() - 0.5) * spread * 1.5,
+    y: customY !== undefined ? customY : cy + (Math.random() - 0.5) * spread * 1.4,
+    z: 0.4 + Math.random() * 0.6,
+    vx: (Math.random() - 0.5) * 0.5,
+    vy: -0.25 - Math.random() * 0.55,
+    char: glyphs[Math.floor(Math.random() * glyphs.length)],
+    color: colors[Math.floor(Math.random() * colors.length)],
+    alpha: 0.25 + Math.random() * 0.75,
+    life: Math.random() * 100
+  };
+}
+
+/**
+ * ============================================================================
+ * 60FPS REAL-TIME 3D PARALLAX & VOLUMETRIC ASCII RENDER LOOP
+ * ============================================================================
+ */
+let lastFrameTime = performance.now();
+let frameCounter = 0;
+let currentFps = 60;
+
+function renderFrame(now) {
+  frameCounter++;
+  if (now - lastFrameTime >= 500) {
+    currentFps = Math.min(60, Math.round((frameCounter * 1000) / (now - lastFrameTime)));
+    document.getElementById('fpsBadge').textContent = `${currentFps} FPS`;
+    document.getElementById('statsReadout').textContent =
+      `glyphs: ${state.glyphCount.toLocaleString()} · 7 lilies · 8 tulips · ymin=${state.bbox.ymin} ymax=${state.bbox.ymax} · ${currentFps}fps`;
+    frameCounter = 0;
+    lastFrameTime = now;
+  }
+
+  state.time += 0.022;
+
+  // Smoothly interpolate 3D camera parallax tilt from mouse position
+  const targetTiltX = state.parallaxAndWind && state.mouseActive ? state.normMouseX * 18.0 : Math.sin(state.time * 0.4) * 5.0;
+  const targetTiltY = state.parallaxAndWind && state.mouseActive ? state.normMouseY * 12.0 : Math.cos(state.time * 0.3) * 3.5;
+  state.smoothTiltX += (targetTiltX - state.smoothTiltX) * 0.08;
+  state.smoothTiltY += (targetTiltY - state.smoothTiltY) * 0.08;
+
+  // Advance multi-layer 3D Re-Bloom animation
+  if (state.isBlooming) {
+    state.bloomProgress += 0.011;
+    if (state.bloomProgress >= 1.0) {
+      state.bloomProgress = 1.0;
+      state.isBlooming = false;
+    }
+  }
+
+  // 1. Clear Pure Pitch-Black Background (#030305)
+  ctx.fillStyle = '#030305';
+  ctx.fillRect(0, 0, W, H);
+
+  // 2. Render Background Starfield with subtle inverse depth parallax
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    s.phase += s.speed;
+    if (state.parallaxAndWind) {
+      s.y += s.driftY;
+      if (s.y < -10) s.y = H + 10;
+    }
+    const sx = s.x - state.smoothTiltX * s.z * 0.6;
+    const sy = s.y - state.smoothTiltY * s.z * 0.6;
+    ctx.font = `${s.size}px "JetBrains Mono", monospace`;
+    ctx.fillStyle = s.color;
+    ctx.globalAlpha = 0.16 + 0.72 * Math.abs(Math.sin(s.phase));
+    ctx.fillText(s.char, sx, sy);
+  }
+  ctx.globalAlpha = 1.0;
+
+  // 3. Multi-Pass CRT Phosphor Glow Underlay
+  if (state.glowIntensity > 0.02) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = state.glowIntensity * 0.44 * state.bloomProgress;
+    ctx.drawImage(
+      glowCanvas,
+      state.smoothTiltX * 0.35,
+      state.smoothTiltY * 0.35,
+      W,
+      H
+    );
+    ctx.restore();
+  }
+
+  // 4. Render 3D Depth-Shifted Directional & Volumetric ASCII Characters
+  ctx.font = `${state.fontSize <= 5.5 ? '700' : '600'} ${state.fontSize}px "JetBrains Mono", monospace`;
+
+  const mx = state.mouseX;
+  const my = state.mouseY;
+  const hoverRadius = 88;
+  const hoverRadiusSq = hoverRadius * hoverRadius;
+
+  for (let i = 0; i < asciiGrid.length; i++) {
+    const cell = asciiGrid[i];
+
+    // Layer-by-layer 3D Re-Bloom check (grows stems first, then back blooms, then hero front blooms)
+    if (state.isBlooming && cell.bloomOrder > state.bloomProgress) continue;
+
+    // True 3D Parallax Shift based on cell's Z-buffer depth (z = 0.2..0.95)
+    const depthOffset = (cell.z - 0.45);
+    let drawX = cell.x + state.smoothTiltX * depthOffset;
+    let drawY = cell.y + state.smoothTiltY * depthOffset;
+    let char = cell.char;
+
+    // Gentle organic wind sway weighted by bouquet height & Z-layer
+    if (state.parallaxAndWind) {
+      const sway = Math.sin(state.time + cell.y * 0.009 + cell.z * 4.0) * 2.6 * cell.swayWeight;
+      drawX += sway;
+    }
+
+    // Compute 3D Chiaroscuro & Palette Color
+    let [r, g, b] = transformColorPalette(cell.r, cell.g, cell.b, cell.isContour, cell.lum, state.palette);
+
+    // Interactive Cursor Petal-Parting & Specular Shimmer
+    if (state.mouseActive && !state.showLoupe && !state.shiftHeld) {
+      const dx = drawX - mx;
+      const dy = drawY - my;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq < hoverRadiusSq) {
+        const dist = Math.sqrt(distSq) || 1;
+        const factor = 1 - dist / hoverRadius;
+
+        drawX += (dx / dist) * factor * 4.5 * cell.z;
+        drawY += (dy / dist) * factor * 4.5 * cell.z;
+
+        r = Math.min(255, (r + factor * 70) | 0);
+        g = Math.min(255, (g + factor * 60) | 0);
+        b = Math.min(255, (b + factor * 80) | 0);
+      }
+    }
+
+    // Glowing leading wave during Re-Bloom animation
+    if (state.isBlooming && state.bloomProgress - cell.bloomOrder < 0.045) {
+      r = 255;
+      g = 245;
+      b = 165;
+      char = '@';
+    }
+
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillText(char, drawX, drawY);
+  }
+
+  // 5. Render Rising Golden Pollen Motes with 3D Parallax
+  if (state.parallaxAndWind) {
+    ctx.font = `10px "JetBrains Mono", monospace`;
+    for (let i = 0; i < pollenParticles.length; i++) {
+      const p = pollenParticles[i];
+      p.x += p.vx + Math.sin(state.time + p.life) * 0.22;
+      p.y += p.vy;
+      p.life += 0.038;
+
+      const px = p.x + state.smoothTiltX * (p.z - 0.4);
+      const py = p.y + state.smoothTiltY * (p.z - 0.4);
+
+      const pulse = 0.25 + 0.75 * Math.abs(Math.sin(p.life));
+      ctx.globalAlpha = p.alpha * pulse * state.bloomProgress;
+      ctx.fillStyle = p.color;
+      ctx.fillText(p.char, px, py);
+
+      if (p.y < state.bbox.ymin - 60 || p.life > 120) {
+        pollenParticles[i] = createPollenMote();
+      }
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  // 6. Interactive Micro-ASCII Magnifier Loupe (Toggle or Hold Shift)
+  if ((state.showLoupe || state.shiftHeld) && state.mouseActive) {
+    renderMagnifierLoupe(mx, my);
+  }
+
+  requestAnimationFrame(renderFrame);
+}
+
+/**
+ * High-Magnification Loupe to inspect Tulip Cup Contours & Lily Anther Glyphs
+ */
+function renderMagnifierLoupe(mx, my) {
+  const loupeRadius = 92;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(mx, my, loupeRadius, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(3, 3, 7, 0.95)';
+  ctx.fill();
+  ctx.lineWidth = 2.0;
+  ctx.strokeStyle = 'rgba(251, 113, 133, 0.85)';
+  ctx.stroke();
+  ctx.clip();
+
+  ctx.font = `700 12px "JetBrains Mono", monospace`;
+  const zoom = 2.35;
+  const searchRadius = loupeRadius / zoom;
+
+  for (let i = 0; i < asciiGrid.length; i++) {
+    const cell = asciiGrid[i];
+    const depthOffset = (cell.z - 0.45);
+    const cx = cell.x + state.smoothTiltX * depthOffset;
+    const cy = cell.y + state.smoothTiltY * depthOffset;
+
+    const dx = cx - mx;
+    const dy = cy - my;
+    if (Math.abs(dx) < searchRadius && Math.abs(dy) < searchRadius) {
+      const [r, g, b] = transformColorPalette(cell.r, cell.g, cell.b, cell.isContour, cell.lum, state.palette);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillText(cell.char, mx + dx * zoom, my + dy * zoom);
+    }
+  }
+
+  // Subtle Loupe HUD Crosshair
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(mx - loupeRadius, my);
+  ctx.lineTo(mx + loupeRadius, my);
+  ctx.moveTo(mx, my - loupeRadius);
+  ctx.lineTo(mx, my + loupeRadius);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+/**
+ * ============================================================================
+ * INTERACTIVE CONTROLS & EVENT LISTENERS
+ * ============================================================================
+ */
+let resizeTimeout = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    build3DBouquetAndAsciiGrid();
+    initParticles();
+  }, 120);
+});
+
+window.addEventListener('mousemove', (e) => {
+  state.mouseX = e.clientX;
+  state.mouseY = e.clientY;
+  state.normMouseX = (e.clientX / W - 0.5) * 2.0;
+  state.normMouseY = (e.clientY / H - 0.5) * 2.0;
+  state.mouseActive = true;
+
+  if (state.parallaxAndWind && Math.random() < 0.2 && pollenParticles.length < 80) {
+    pollenParticles.push(createPollenMote(e.clientX + (Math.random() - 0.5) * 20, e.clientY + (Math.random() - 0.5) * 20));
+  }
+});
+
+window.addEventListener('mouseleave', () => {
+  state.mouseActive = false;
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Shift') state.shiftHeld = true;
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.key === 'Shift') state.shiftHeld = false;
+});
+
+window.addEventListener('touchmove', (e) => {
+  if (e.touches.length > 0) {
+    const t = e.touches[0];
+    state.mouseX = t.clientX;
+    state.mouseY = t.clientY;
+    state.normMouseX = (t.clientX / W - 0.5) * 2.0;
+    state.normMouseY = (t.clientY / H - 0.5) * 2.0;
+    state.mouseActive = true;
+  }
+}, { passive: true });
+
+window.addEventListener('touchend', () => {
+  state.mouseActive = false;
+});
+
+// HUD Panel Collapse Toggle
+const hudToggleBtn = document.getElementById('hudToggleBtn');
+const hudPanel = document.getElementById('hudPanel');
+let hudOpen = true;
+
+hudToggleBtn.addEventListener('click', () => {
+  hudOpen = !hudOpen;
+  if (hudOpen) {
+    hudPanel.classList.remove('opacity-0', 'scale-95', 'pointer-events-none');
+  } else {
+    hudPanel.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
+  }
+});
+
+// Character Density / Resolution Toggle Buttons (Ultra HD 5px, Classic 7px, Macro 9px)
+const resButtons = document.querySelectorAll('.res-btn');
+const densityLabel = document.getElementById('densityLabel');
+resButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const size = parseInt(btn.getAttribute('data-size'), 10);
+    if (size === 5) {
+      state.fontSize = 5.5;
+      state.stepX = 4.2;
+      state.stepY = 6.0;
+      densityLabel.textContent = 'Ultra-Fine HD (5.5px)';
+    } else if (size === 7) {
+      state.fontSize = 7.0;
+      state.stepX = 5.2;
+      state.stepY = 7.5;
+      densityLabel.textContent = 'Classic Terminal (7px)';
+    } else {
+      state.fontSize = 9.0;
+      state.stepX = 6.6;
+      state.stepY = 9.5;
+      densityLabel.textContent = 'Macro (9px)';
+    }
+
+    resButtons.forEach(b => {
+      b.className = 'res-btn py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] transition';
+    });
+    btn.className = 'res-btn py-1.5 rounded-lg border border-rose-500/50 bg-rose-500/20 text-white text-[11px] transition';
+
+    build3DBouquetAndAsciiGrid();
+  });
+});
+
+// 3D Chiaroscuro & Rim Glow Slider
+const glowSlider = document.getElementById('glowSlider');
+const glowValue = document.getElementById('glowValue');
+glowSlider.addEventListener('input', (e) => {
+  const val = parseInt(e.target.value, 10);
+  state.glowIntensity = val / 100;
+  glowValue.textContent = `${val}%`;
+});
+
+// Lighting & Palette Mode Buttons
+const paletteBtns = document.querySelectorAll('.palette-btn');
+paletteBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.palette = btn.getAttribute('data-palette');
+    paletteBtns.forEach(b => {
+      b.className = 'palette-btn py-1.5 px-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] text-left truncate';
+    });
+    btn.className = 'palette-btn py-1.5 px-2 rounded-lg border border-rose-500/50 bg-rose-500/20 text-white text-[11px] text-left truncate';
+  });
+});
+
+// 3D Parallax & Loupe Checkboxes
+document.getElementById('swayToggle').addEventListener('change', (e) => {
+  state.parallaxAndWind = e.target.checked;
+});
+
+document.getElementById('loupeToggle').addEventListener('change', (e) => {
+  state.showLoupe = e.target.checked;
+});
+
+// Re-Bloom 3D Bouquet Button (Unfurls Stems -> Foliage -> Back Tulips -> Front Hero Lilies)
+document.getElementById('rebloomBtn').addEventListener('click', () => {
+  state.bloomProgress = 0.0;
+  state.isBlooming = true;
+});
+
+// Cinema Mode Toggle Button
+document.getElementById('hideUiBtn').addEventListener('click', () => {
+  state.cinemaMode = !state.cinemaMode;
+  document.getElementById('topBanner').style.opacity = state.cinemaMode ? '0' : '1';
+});
+
+// Initialize on Window Load
+window.onload = () => {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  build3DBouquetAndAsciiGrid();
+  initParticles();
+  requestAnimationFrame(renderFrame);
+};
+</script>
+</body>
+</html>
